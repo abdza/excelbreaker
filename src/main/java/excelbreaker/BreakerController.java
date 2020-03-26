@@ -1,6 +1,8 @@
 package excelbreaker;
 
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -14,8 +16,10 @@ import javax.servlet.http.HttpServletResponse;
 
 import org.apache.commons.text.StringSubstitutor;
 import org.apache.poi.EncryptedDocumentException;
+import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
+import org.apache.poi.ss.usermodel.CreationHelper;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -154,8 +158,8 @@ public class BreakerController {
 	@RequestMapping(value="/setup",method=RequestMethod.POST)
 	public String breakit(Model model) {		
 		List<String> headers = (ArrayList<String>)request.getSession().getAttribute("headers");
-		headerfilter("gender","gender_${activefilter}",headers);
-		return "results.html";
+		headerfilter("gender","gender_${activefilter}.xlsx",headers);
+		return "redirect:/";
 	}
 	
 	public void headerfilter(String headerfilter, String outputfile, List<String> headers) {
@@ -176,19 +180,57 @@ public class BreakerController {
 			psource.addValue(headerfilter, filter);
 			SqlRowSet inresult = namedjdbctemplate.queryForRowSet(inquery, psource);
 			
+			HashMap<String,Object> filevar = new HashMap<String,Object>();
+			filevar.put("activefilter", filter.toLowerCase().replaceAll(" ","_"));
+			
+			StringSubstitutor sub = new StringSubstitutor(filevar);
+			String outputloc = sub.replace(outputfile);
+			
+			outputloc = curfolder + "/" + outputloc;
+			
+			Workbook outexcel = new HSSFWorkbook();
+			CreationHelper createHelper = outexcel.getCreationHelper();
+			Sheet sheet = outexcel.createSheet("Sheet");
+			
+			Row headerRow = sheet.createRow(0);
+			for(int i=0;i<headers.size();i++) {
+				Cell cell = headerRow.createCell(i);
+				cell.setCellValue(headers.get(i));
+			}
+			
+			int rowNum = 1;
 			ArrayList<HashMap<String,Object>> rows = new ArrayList<HashMap<String,Object>>(); 
 			while(inresult.next()) {
+				Row row = sheet.createRow(rowNum);
 				HashMap<String,Object> datarow = new HashMap<String,Object>();
-				for(String header:headers) {
-					datarow.put(header,inresult.getObject(header));
+				for(int i=0;i<headers.size();i++) {
+					String header = headers.get(i);
+					Object curval = inresult.getObject(header);
+					row.createCell(i).setCellValue(curval.toString());
+					datarow.put(headers.get(i),curval);
 				}
-				datarow.put("activefilter", filter.toLowerCase().replace(" ", "_"));
-				StringSubstitutor sub = new StringSubstitutor(datarow);
-				String outputloc = sub.replace(outputfile);
-				System.out.println("datarow:" + datarow.toString());
-				System.out.println("outputloc:" + outputloc);
+				System.out.println("datarow:" + datarow.toString());				
 				rows.add(datarow);
+				rowNum+=1;
 			}
+			
+			for(int i=0;i<headers.size();i++) {
+				sheet.autoSizeColumn(i);
+			}
+			
+			try {
+				FileOutputStream fileOut = new FileOutputStream(outputloc);
+				outexcel.write(fileOut);
+				fileOut.close();
+				outexcel.close();
+			} catch (FileNotFoundException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			} catch (IOException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			
 		}
 	}
 
