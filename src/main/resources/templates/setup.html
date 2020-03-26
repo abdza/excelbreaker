@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>File Breaker</title>
+<link href="../static/css/Layout.css"
+	th:href="@{/webjars/bootstrap/4.4.1-1/css/bootstrap.min.css}"
+	rel="stylesheet" />
+</head>
+<body>
+	<div class="container">
+		<h1>Setup Excel File Breaker</h1>
+		<form method="post" class="form">
+		<fieldset th:each="header: ${headers}" class="form-group row">
+		<label th:text="${header}" class="col-sm-2 col-form-label"></label>
+		<input type="text" th:name="${header}" class="form-control col-sm-10"/>
+		</fieldset>
+		<button type='submit'>Break</button>
+		</form>
+	</div>
+</body>
+<script type="text/javascript"
+	th:src="@{/webjars/jquery/3.4.1/jquery.min.js}"></script>
+<script type="text/javascript"
+	th:src="@{/webjars/bootstrap/3.3.7/js/bootstrap.min.js}"></script>
+</html>
