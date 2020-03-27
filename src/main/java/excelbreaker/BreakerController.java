@@ -153,7 +153,11 @@ public class BreakerController {
 				if(postdata.get("hide_" + header)!=null) {
 					hidefilter = true;
 				}
-				headerfilter(header,postdata.get("head_" + header)[0],hidefilter,postdata.get("sheet_" + header)[0],headers);
+				String sheetname = "Sheet 1";
+				if(postdata.get("sheet_" + header)!=null && postdata.get("sheet_" + header)[0].length()>3) {
+					sheetname = postdata.get("sheet_" + header)[0];
+				}
+				headerfilter(header,postdata.get("head_" + header)[0],hidefilter,sheetname,headers);
 			}
 		}
 		return "redirect:/";
