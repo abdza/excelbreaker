@@ -13,7 +13,7 @@
 		<form method="post" class="form">
 		<fieldset th:each="header: ${headers}" class="form-group row">
 		<label th:text="${header}" class="col-sm-2 col-form-label"></label>
-		<input type="text" th:name="${header}" class="form-control col-sm-10"/>
+		<input type="text" th:name="${'head_' + header}" class="form-control col-sm-10"/>
 		</fieldset>
 		<button type='submit'>Break</button>
 		</form>
