@@ -10,10 +10,14 @@
 <body>
 	<div class="container">
 		<h1>Setup Excel File Breaker</h1>
+		<p>Template of the filename to generate. Use ${activefilter} to replace with the value of the filtered column. Filename output and sheet name. Check box
+		to hide the currently filtering column</p>
 		<form method="post" class="form">
 		<fieldset th:each="header: ${headers}" class="form-group row">
 		<label th:text="${header}" class="col-sm-2 col-form-label"></label>
-		<input type="text" th:name="${'head_' + header}" class="form-control col-sm-10"/>
+		<input type="text" th:name="${'head_' + header}" class="form-control col-sm-4"/>
+		<input type="text" th:name="${'sheet_' + header}" class="form-control col-sm-4"/>
+		<input type="checkbox" th:name="${'hide_' + header}" class="form-control col-sm-2"/>
 		</fieldset>
 		<button type='submit'>Break</button>
 		</form>

@@ -94,7 +94,6 @@ public class BreakerController {
 				while(cells.hasNext()) {
 					cell = cells.next();
 					if(cell.getCellType()==CellType.NUMERIC) {
-						//Double curcontent = cell.getNumericCellValue();
 						if(!firstrow && !headers.get(hpos).equals("id")) {
 							DataFormatter fmt = new DataFormatter();
 							String curcontent = fmt.formatCellValue(cell);
@@ -150,13 +149,23 @@ public class BreakerController {
 		Map<String, String[]> postdata = request.getParameterMap();
 		for(String header:headers) {
 			if(postdata.get("head_" + header)!=null && postdata.get("head_" + header)[0].length()>3) {
-				headerfilter(header,postdata.get("head_" + header)[0],headers);
+				Boolean hidefilter = false;
+				if(postdata.get("hide_" + header)!=null) {
+					hidefilter = true;
+				}
+				headerfilter(header,postdata.get("head_" + header)[0],hidefilter,postdata.get("sheet_" + header)[0],headers);
 			}
 		}
 		return "redirect:/";
 	}
 	
-	public void headerfilter(String headerfilter, String outputfile, List<String> headers) {
+	public void headerfilter(String headerfilter, String outputfile, Boolean hidefilter, String sheetname, List<String> headers) {
+		List<String> qheaders = new ArrayList<String>();
+		for(String header:headers) {
+			if(!header.equals(headerfilter) || !hidefilter) {
+				qheaders.add(header);
+			}
+		}
 		MapSqlParameterSource paramsource = new MapSqlParameterSource();
 		String dquery = "select distinct " + headerfilter + " from filebreaker";
 		SqlRowSet toret = namedjdbctemplate.queryForRowSet(dquery, paramsource);
@@ -179,6 +188,8 @@ public class BreakerController {
 			StringSubstitutor sub = new StringSubstitutor(filevar);
 			String outputloc = sub.replace(outputfile);
 			
+			String finalsheetname = sub.replace(sheetname);
+			
 			outputloc = curfolder + "/output/" + outputloc;
 			
 			String[] pathparts = outputloc.split("/");
@@ -190,12 +201,11 @@ public class BreakerController {
 			
 			Workbook outexcel = new HSSFWorkbook();
 			CreationHelper createHelper = outexcel.getCreationHelper();
-			Sheet sheet = outexcel.createSheet("Sheet");
-			
+			Sheet sheet = outexcel.createSheet(finalsheetname);
 			Row headerRow = sheet.createRow(0);
-			for(int i=0;i<headers.size();i++) {
+			for(int i=0;i<qheaders.size();i++) {
 				Cell cell = headerRow.createCell(i);
-				cell.setCellValue(headers.get(i));
+				cell.setCellValue(qheaders.get(i));
 			}
 			
 			int rowNum = 1;
@@ -203,15 +213,15 @@ public class BreakerController {
 			while(inresult.next()) {
 				Row row = sheet.createRow(rowNum);
 				HashMap<String,Object> datarow = new HashMap<String,Object>();
-				for(int i=0;i<headers.size();i++) {
-					String header = headers.get(i);
+				for(int i=0;i<qheaders.size();i++) {
+					String header = qheaders.get(i);
 					Object curval = inresult.getObject(header);
 					row.createCell(i).setCellValue(curval.toString());
 				}
 				rowNum+=1;
 			}
 			
-			for(int i=0;i<headers.size();i++) {
+			for(int i=0;i<qheaders.size();i++) {
 				sheet.autoSizeColumn(i);
 			}
 			
