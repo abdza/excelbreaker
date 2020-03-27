@@ -18,6 +18,7 @@ import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.CreationHelper;
+import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
@@ -93,9 +94,11 @@ public class BreakerController {
 				while(cells.hasNext()) {
 					cell = cells.next();
 					if(cell.getCellType()==CellType.NUMERIC) {
-						Double curcontent = cell.getNumericCellValue();
+						//Double curcontent = cell.getNumericCellValue();
 						if(!firstrow && !headers.get(hpos).equals("id")) {
-							tparam.addValue(headers.get(hpos), curcontent.toString());
+							DataFormatter fmt = new DataFormatter();
+							String curcontent = fmt.formatCellValue(cell);
+							tparam.addValue(headers.get(hpos), curcontent);
 						}
 					}
 					else {
