@@ -23,6 +23,7 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -203,7 +204,7 @@ public class BreakerController {
 				fpath.mkdirs();
 			}
 			
-			Workbook outexcel = new HSSFWorkbook();
+			Workbook outexcel = new XSSFWorkbook();
 			CreationHelper createHelper = outexcel.getCreationHelper();
 			Sheet sheet = outexcel.createSheet(finalsheetname);
 			Row headerRow = sheet.createRow(0);
