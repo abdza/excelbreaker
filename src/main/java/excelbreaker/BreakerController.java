@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -12,9 +13,12 @@ import java.util.List;
 import java.util.Map;
 
 import javax.servlet.http.HttpServletRequest;
+import javax.xml.parsers.ParserConfigurationException;
+
 import org.apache.commons.text.StringSubstitutor;
 import org.apache.poi.EncryptedDocumentException;
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
+import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.CreationHelper;
@@ -23,6 +27,10 @@ import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.usermodel.WorkbookFactory;
+import org.apache.poi.util.XMLHelper;
+import org.apache.poi.xssf.eventusermodel.XSSFReader;
+import org.apache.poi.xssf.model.SharedStringsTable;
+import org.apache.poi.xssf.streaming.SXSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -35,6 +43,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.multipart.MultipartFile;
+import org.xml.sax.Attributes;
+import org.xml.sax.ContentHandler;
+import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.XMLReader;
+import org.xml.sax.helpers.DefaultHandler;
 
 @Controller
 public class BreakerController {
@@ -52,6 +66,122 @@ public class BreakerController {
 	public String main(Model model) {
 		return "main.html";
 	}
+	
+	public String lastvalue=null;
+	
+	
+	public void processOneSheet(String filename) throws Exception {
+        OPCPackage pkg = OPCPackage.open(filename);
+        XSSFReader r = new XSSFReader( pkg );
+        SharedStringsTable sst = r.getSharedStringsTable();
+        XMLReader parser = fetchSheetParser(sst);
+        InputStream sheet = r.getSheetsData().next();
+        InputSource sheetSource = new InputSource(sheet);
+        if(sheetSource!=null) {
+        	parser.parse(sheetSource);
+        }
+        sheet.close();
+        pkg.close();
+    }
+	
+	public XMLReader fetchSheetParser(SharedStringsTable sst) throws SAXException, ParserConfigurationException {
+        XMLReader parser = XMLHelper.newXMLReader();
+        ContentHandler handler = new SheetHandler(sst,jdbctemplate,namedjdbctemplate,request);
+        parser.setContentHandler(handler);
+        return parser;
+    }
+    /**
+     * See org.xml.sax.helpers.DefaultHandler javadocs
+     */
+    private static class SheetHandler extends DefaultHandler {
+        private SharedStringsTable sst;
+        private String lastContents;
+        private boolean nextIsString;
+        private String dquery;
+        private boolean firstRow = true;
+        private int hpos;
+        private HttpServletRequest inrequest;
+        
+        private JdbcTemplate injdbctemplate;
+        
+        private NamedParameterJdbcTemplate innamedjdbctemplate;
+        
+        List<String> headers = new ArrayList<String>();
+        List<String> qheaders = new ArrayList<String>();
+        
+        private SheetHandler(SharedStringsTable sst,JdbcTemplate injdbctemplate,NamedParameterJdbcTemplate innamedjdbctemplate,HttpServletRequest inrequest) {
+            this.sst = sst;
+            this.injdbctemplate = injdbctemplate;
+            this.innamedjdbctemplate = innamedjdbctemplate;
+            this.inrequest = inrequest;
+        }
+        MapSqlParameterSource tparam;
+        public void startElement(String uri, String localName, String name,
+                                 Attributes attributes) throws SAXException {
+            // c => cell
+            if(name.equals("c")) {
+                // Figure out if the value is an index in the SST
+                String cellType = attributes.getValue("t");
+                if(cellType != null && cellType.equals("s")) {
+                    nextIsString = true;
+                } else {
+                    nextIsString = false;
+                }
+            }
+            if(name.equals("row")) {
+            	tparam = new MapSqlParameterSource();
+            	hpos = 0;
+            	if(!firstRow) {
+            		dquery = "insert into filebreaker (" + String.join(",", qheaders) + ") values (:" + String.join(",:" , qheaders) + ")";
+            	}
+            }
+            // Clear contents cache
+            lastContents = "";
+        }
+        public void endElement(String uri, String localName, String name)
+                throws SAXException {
+            // Process the last contents as required.
+            // Do now, as characters() may be called more than once
+            if(nextIsString) {
+                int idx = Integer.parseInt(lastContents);
+                lastContents = sst.getItemAt(idx).getString();
+                nextIsString = false;
+            }
+            // v => contents of a cell
+            // Output after we've seen the string contents
+            if(name.equals("v")) {
+                if(firstRow) {
+                	
+                	headers.add(lastContents.replaceAll(" ", "_"));
+                	if(!lastContents.equals("id") && lastContents!=null) {
+                		qheaders.add(lastContents.replaceAll(" ", "_"));
+                		dquery = "alter table filebreaker add "+ lastContents.replaceAll(" ", "_") +" varchar(256) NULL";
+                		injdbctemplate.execute(dquery);
+                	}
+                	
+                }
+                else {
+                	tparam.addValue(headers.get(hpos), lastContents);
+                }
+                hpos+=1;
+            }
+            if(name.equals("row")) {
+            	if(!firstRow) {
+            		innamedjdbctemplate.update(dquery, tparam);
+            		
+            	}        
+            	else {
+            		firstRow=false;
+            		inrequest.getSession().setAttribute("headers", headers);
+            	}
+            }
+        }
+        public void characters(char[] ch, int start, int length) {
+            lastContents += new String(ch, start, length);
+        }
+    }
+	
+	
 	
 	@RequestMapping(value="/",method=RequestMethod.POST)
 	public String upload(@RequestParam("file") MultipartFile file,Model model) {
@@ -75,62 +205,16 @@ public class BreakerController {
 		jdbctemplate.execute("create table filebreaker (id INT NOT NULL IDENTITY(1,1),CONSTRAINT PK_filebreaker PRIMARY KEY(id))");
 		
 		try {
-			Workbook workbook = WorkbookFactory.create(curfile);
-			Sheet sheet = workbook.getSheetAt(0);
-			Iterator<Row> rows = sheet.rowIterator();
-			Row drow;
-			Boolean stoprow=false;
-			Boolean firstrow=true;
-			while(rows.hasNext() && !stoprow) {
-				MapSqlParameterSource tparam = new MapSqlParameterSource();
-				drow = rows.next();
-				
-				Iterator<Cell> cells = drow.cellIterator();					
-				Cell cell;
-				Integer hpos = 0;
-				String dquery = null;
-				if(!firstrow) {
-					dquery = "insert into filebreaker (" + String.join(",", qheaders) + ") values (:" + String.join(",:" , qheaders) + ")";
-				}
-				while(cells.hasNext()) {
-					cell = cells.next();
-					if(cell.getCellType()==CellType.NUMERIC) {
-						if(!firstrow && !headers.get(hpos).equals("id")) {
-							DataFormatter fmt = new DataFormatter();
-							String curcontent = fmt.formatCellValue(cell);
-							tparam.addValue(headers.get(hpos), curcontent);
-						}
-					}
-					else {
-						String curcontent = cell.getStringCellValue();
-						if(firstrow) {
-							headers.add(curcontent);
-							if(!curcontent.equals("id")) {
-								qheaders.add(curcontent);
-								String query = "alter table filebreaker add "+ curcontent.replaceAll(" ", "_") +" varchar(256) NULL";
-								jdbctemplate.execute(query);	
-							}				
-						}
-						else {
-							if(!headers.get(hpos).equals("id")) {
-								tparam.addValue(headers.get(hpos), curcontent.toString());
-							}
-						}
-					}
-					hpos+=1;
-				}
-				if(!firstrow) {
-					namedjdbctemplate.update(dquery, tparam);
-				}
-				firstrow = false;				
-			}
-			workbook.close();
-			request.getSession().setAttribute("headers", headers);
+			processOneSheet(filepath);
 			curfile.delete();
+			System.gc();
 		} catch (EncryptedDocumentException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		} catch (IOException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (Exception e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
@@ -165,6 +249,7 @@ public class BreakerController {
 	}
 	
 	public void headerfilter(String headerfilter, String outputfile, Boolean hidefilter, String sheetname, List<String> headers) {
+		System.out.println("Filtering:" + headerfilter);
 		List<String> qheaders = new ArrayList<String>();
 		for(String header:headers) {
 			if(!header.equals(headerfilter) || !hidefilter) {
@@ -204,9 +289,9 @@ public class BreakerController {
 				fpath.mkdirs();
 			}
 			
-			Workbook outexcel = new XSSFWorkbook();
-			CreationHelper createHelper = outexcel.getCreationHelper();
-			Sheet sheet = outexcel.createSheet(finalsheetname);
+			SXSSFWorkbook wb = new SXSSFWorkbook(100); // keep 100 rows in memory, exceeding rows will be flushed to disk
+			Sheet sheet = wb.createSheet();
+		       
 			Row headerRow = sheet.createRow(0);
 			for(int i=0;i<qheaders.size();i++) {
 				Cell cell = headerRow.createCell(i);
@@ -226,15 +311,18 @@ public class BreakerController {
 				rowNum+=1;
 			}
 			
-			for(int i=0;i<qheaders.size();i++) {
+			/* for(int i=0;i<qheaders.size();i++) {
 				sheet.autoSizeColumn(i);
-			}
+			}*/
 			
 			try {
 				FileOutputStream fileOut = new FileOutputStream(outputloc);
-				outexcel.write(fileOut);
+				wb.write(fileOut);
 				fileOut.close();
-				outexcel.close();
+				
+				wb.dispose();
+				
+				
 			} catch (FileNotFoundException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
@@ -242,7 +330,7 @@ public class BreakerController {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			}
-			
+			System.gc();
 		}
 	}
 
