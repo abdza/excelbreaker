@@ -249,7 +249,6 @@ public class BreakerController {
 	}
 	
 	public void headerfilter(String headerfilter, String outputfile, Boolean hidefilter, String sheetname, List<String> headers) {
-		System.out.println("Filtering:" + headerfilter);
 		List<String> qheaders = new ArrayList<String>();
 		for(String header:headers) {
 			if(!header.equals(headerfilter) || !hidefilter) {
@@ -295,7 +294,7 @@ public class BreakerController {
 			Row headerRow = sheet.createRow(0);
 			for(int i=0;i<qheaders.size();i++) {
 				Cell cell = headerRow.createCell(i);
-				cell.setCellValue(qheaders.get(i));
+				cell.setCellValue(qheaders.get(i).replaceAll("_", " "));
 			}
 			
 			int rowNum = 1;
