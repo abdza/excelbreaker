@@ -8,7 +8,6 @@ import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -17,25 +16,18 @@ import javax.xml.parsers.ParserConfigurationException;
 
 import org.apache.commons.text.StringSubstitutor;
 import org.apache.poi.EncryptedDocumentException;
-import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.ss.usermodel.BuiltinFormats;
 import org.apache.poi.ss.usermodel.Cell;
-import org.apache.poi.ss.usermodel.CellType;
-import org.apache.poi.ss.usermodel.CreationHelper;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
-import org.apache.poi.ss.usermodel.Workbook;
-import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.util.XMLHelper;
+import org.apache.poi.xssf.eventusermodel.ReadOnlySharedStringsTable;
 import org.apache.poi.xssf.eventusermodel.XSSFReader;
-import org.apache.poi.xssf.model.SharedStringsTable;
 import org.apache.poi.xssf.model.StylesTable;
 import org.apache.poi.xssf.streaming.SXSSFWorkbook;
 import org.apache.poi.xssf.usermodel.XSSFCellStyle;
-import org.apache.poi.xssf.usermodel.XSSFRichTextString;
-import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
@@ -82,7 +74,7 @@ public class BreakerController {
 	public void processOneSheet(String filename) throws Exception {
         OPCPackage pkg = OPCPackage.open(filename);
         XSSFReader r = new XSSFReader( pkg );
-        SharedStringsTable sst = r.getSharedStringsTable();
+        ReadOnlySharedStringsTable sst = new ReadOnlySharedStringsTable(pkg);
         StylesTable styles = r.getStylesTable();
         XMLReader parser = fetchSheetParser(sst,styles);
         InputStream sheet = r.getSheetsData().next();
@@ -94,7 +86,7 @@ public class BreakerController {
         pkg.close();
     }
 	
-	public XMLReader fetchSheetParser(SharedStringsTable sst,StylesTable styles) throws SAXException, ParserConfigurationException {
+	public XMLReader fetchSheetParser(ReadOnlySharedStringsTable sst,StylesTable styles) throws SAXException, ParserConfigurationException {
         XMLReader parser = XMLHelper.newXMLReader();
         ContentHandler handler = new SheetHandler(sst,styles,jdbctemplate,namedjdbctemplate,request);
         parser.setContentHandler(handler);
@@ -104,7 +96,7 @@ public class BreakerController {
      * See org.xml.sax.helpers.DefaultHandler javadocs
      */
     private static class SheetHandler extends DefaultHandler {
-        private SharedStringsTable sst;
+        private ReadOnlySharedStringsTable sst;
         private String lastContents;
         private boolean nextIsString;
         private String dquery;
@@ -128,7 +120,7 @@ public class BreakerController {
         List<String> headers = new ArrayList<String>();
         List<String> qheaders = new ArrayList<String>();
         
-        private SheetHandler(SharedStringsTable sst,StylesTable styles,JdbcTemplate injdbctemplate,NamedParameterJdbcTemplate innamedjdbctemplate,HttpServletRequest inrequest) {
+        private SheetHandler(ReadOnlySharedStringsTable sst,StylesTable styles,JdbcTemplate injdbctemplate,NamedParameterJdbcTemplate innamedjdbctemplate,HttpServletRequest inrequest) {
             this.sst = sst;
             this.stylesTable = styles;
             this.injdbctemplate = injdbctemplate;
