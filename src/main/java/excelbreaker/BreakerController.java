@@ -19,6 +19,7 @@ import org.apache.commons.text.StringSubstitutor;
 import org.apache.poi.EncryptedDocumentException;
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.openxml4j.opc.OPCPackage;
+import org.apache.poi.ss.usermodel.BuiltinFormats;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.CreationHelper;
@@ -30,7 +31,10 @@ import org.apache.poi.ss.usermodel.WorkbookFactory;
 import org.apache.poi.util.XMLHelper;
 import org.apache.poi.xssf.eventusermodel.XSSFReader;
 import org.apache.poi.xssf.model.SharedStringsTable;
+import org.apache.poi.xssf.model.StylesTable;
 import org.apache.poi.xssf.streaming.SXSSFWorkbook;
+import org.apache.poi.xssf.usermodel.XSSFCellStyle;
+import org.apache.poi.xssf.usermodel.XSSFRichTextString;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -53,6 +57,11 @@ import org.xml.sax.helpers.DefaultHandler;
 @Controller
 public class BreakerController {
 	
+    enum xssfDataType {
+        BOOL, ERROR, FORMULA, INLINESTR, SSTINDEX, NUMBER,
+    }
+
+	
 	@Autowired
 	private JdbcTemplate jdbctemplate;
 	
@@ -74,7 +83,8 @@ public class BreakerController {
         OPCPackage pkg = OPCPackage.open(filename);
         XSSFReader r = new XSSFReader( pkg );
         SharedStringsTable sst = r.getSharedStringsTable();
-        XMLReader parser = fetchSheetParser(sst);
+        StylesTable styles = r.getStylesTable();
+        XMLReader parser = fetchSheetParser(sst,styles);
         InputStream sheet = r.getSheetsData().next();
         InputSource sheetSource = new InputSource(sheet);
         if(sheetSource!=null) {
@@ -84,9 +94,9 @@ public class BreakerController {
         pkg.close();
     }
 	
-	public XMLReader fetchSheetParser(SharedStringsTable sst) throws SAXException, ParserConfigurationException {
+	public XMLReader fetchSheetParser(SharedStringsTable sst,StylesTable styles) throws SAXException, ParserConfigurationException {
         XMLReader parser = XMLHelper.newXMLReader();
-        ContentHandler handler = new SheetHandler(sst,jdbctemplate,namedjdbctemplate,request);
+        ContentHandler handler = new SheetHandler(sst,styles,jdbctemplate,namedjdbctemplate,request);
         parser.setContentHandler(handler);
         return parser;
     }
@@ -101,6 +111,15 @@ public class BreakerController {
         private boolean firstRow = true;
         private int hpos;
         private HttpServletRequest inrequest;
+        // Used to format numeric cell values.
+        private short formatIndex;
+        private String formatString;
+        private StylesTable stylesTable;
+        private xssfDataType nextDataType;
+
+
+        private final DataFormatter formatter;
+
         
         private JdbcTemplate injdbctemplate;
         
@@ -109,23 +128,50 @@ public class BreakerController {
         List<String> headers = new ArrayList<String>();
         List<String> qheaders = new ArrayList<String>();
         
-        private SheetHandler(SharedStringsTable sst,JdbcTemplate injdbctemplate,NamedParameterJdbcTemplate innamedjdbctemplate,HttpServletRequest inrequest) {
+        private SheetHandler(SharedStringsTable sst,StylesTable styles,JdbcTemplate injdbctemplate,NamedParameterJdbcTemplate innamedjdbctemplate,HttpServletRequest inrequest) {
             this.sst = sst;
+            this.stylesTable = styles;
             this.injdbctemplate = injdbctemplate;
             this.innamedjdbctemplate = innamedjdbctemplate;
             this.inrequest = inrequest;
+            this.nextDataType = xssfDataType.NUMBER;
+            this.formatter = new DataFormatter();
         }
         MapSqlParameterSource tparam;
         public void startElement(String uri, String localName, String name,
                                  Attributes attributes) throws SAXException {
             // c => cell
             if(name.equals("c")) {
-                // Figure out if the value is an index in the SST
+                this.nextDataType = xssfDataType.NUMBER;
+                this.formatIndex = -1;
+                this.formatString = null;
                 String cellType = attributes.getValue("t");
                 if(cellType != null && cellType.equals("s")) {
                     nextIsString = true;
                 } else {
                     nextIsString = false;
+                }
+                String cellStyleStr = attributes.getValue("s");
+                if ("b".equals(cellType))
+                    nextDataType = xssfDataType.BOOL;
+                else if ("e".equals(cellType))
+                    nextDataType = xssfDataType.ERROR;
+                else if ("inlineStr".equals(cellType))
+                    nextDataType = xssfDataType.INLINESTR;
+                else if ("s".equals(cellType))
+                    nextDataType = xssfDataType.SSTINDEX;
+                else if ("str".equals(cellType))
+                    nextDataType = xssfDataType.FORMULA;
+                else if (cellStyleStr != null) {
+                    // It's a number, but almost certainly one
+                    // with a special style or format
+                    int styleIndex = Integer.parseInt(cellStyleStr);
+                    XSSFCellStyle style = stylesTable.getStyleAt(styleIndex);
+                    this.formatIndex = style.getDataFormat();
+                    this.formatString = style.getDataFormatString();
+                    if (this.formatString == null)
+                        this.formatString = BuiltinFormats
+                                .getBuiltinFormat(this.formatIndex);
                 }
             }
             if(name.equals("row")) {
@@ -142,7 +188,7 @@ public class BreakerController {
                 throws SAXException {
             // Process the last contents as required.
             // Do now, as characters() may be called more than once
-            if(nextIsString) {
+        	if(nextIsString) {
                 int idx = Integer.parseInt(lastContents);
                 lastContents = sst.getItemAt(idx).getString();
                 nextIsString = false;
@@ -161,7 +207,23 @@ public class BreakerController {
                 	
                 }
                 else {
-                	tparam.addValue(headers.get(hpos), lastContents);
+                    String thisStr = lastContents;
+
+                    switch (nextDataType) {
+
+                    case NUMBER:
+                        String n = lastContents.toString();
+                        if (this.formatString != null)
+                            thisStr = formatter.formatRawCellContents(Double
+                                    .parseDouble(n), this.formatIndex,
+                                    this.formatString);
+                        else
+                            thisStr = n;
+                        break;
+                    }
+
+                	
+                	tparam.addValue(headers.get(hpos), thisStr);
                 }
                 hpos+=1;
             }
